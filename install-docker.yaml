@@ -1,0 +1,128 @@
+---
+- name: Install required system packages, Docker, and Python virtual environment
+  hosts: dockerhost
+  become: true
+  vars:
+    http_container_count: 4
+    http_container_name: webserver
+    http_container_image: httpd
+
+  tasks:
+    - name: Install aptitude
+      apt:
+        name: aptitude
+        state: latest
+        update_cache: true
+
+    - name: Install required system packages
+      apt:
+        pkg:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - python3-pip
+          - python3-setuptools
+        state: latest
+        update_cache: true
+
+    - name: Create directory for APT keyrings
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Ensure curl is installed
+      apt:
+        name: curl
+        state: present
+
+    - name: Download Docker GPG key using curl
+      command: >
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+      args:
+        creates: /etc/apt/keyrings/docker.asc
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu focal stable"
+        state: present
+
+    - name: Update apt and install docker-ce
+      apt:
+        name: docker-ce
+        state: latest
+        update_cache: true
+
+    - name: Install python3-venv package
+      apt:
+        name: python3-venv
+        state: present
+        update_cache: yes
+
+    - name: Create a virtual environment named 'myenv'
+      command:
+        cmd: python3 -m venv myenv
+        creates: "{{ ansible_env.PWD }}/myenv"
+
+    - name: Display virtual environment activation command
+      debug:
+        msg: "Run 'source myenv/bin/activate' to activate the virtual environment"
+
+    - name: Install Docker Python module in the virtual environment
+      pip:
+        name: docker
+        executable: "{{ ansible_env.PWD }}/myenv/bin/pip"
+
+    - name: Add Ubuntu user to Docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    - name: Create webcontainer directory
+      file:
+        path: /home/ubuntu/webcontainer
+        state: directory
+
+    - name: Create webcontent
+      template:
+        src: index.html.j2
+        dest: /home/ubuntu/webcontainer/index.html
+        owner: ubuntu
+        group: docker
+        mode: 0774
+
+    - name: Create webserver containers
+      community.docker.docker_container:
+        name: "{{ http_container_name }}{{ item }}"
+        image: "{{ http_container_image }}"
+        state: started
+        volumes:
+          - /home/ubuntu/webcontainer/:/usr/local/apache2/htdocs/
+        ports:
+          - "808{{ item }}:80"
+      with_sequence: count="{{ http_container_count }}"
+
+    - name: Create haproxy config directory
+      file:
+        path: /home/ubuntu/loadbalancer
+        state: directory
+
+    - name: Create haproxy.cfg
+      template:
+        src: haproxy.cfg.j2
+        dest: /home/ubuntu/loadbalancer/haproxy.cfg
+        owner: ubuntu
+        group: docker
+        mode: 0774
+
+    - name: Create Haproxy container
+      community.docker.docker_container:
+        name: loadbalancer
+        image: 'haproxy'
+        state: started
+        volumes:
+          - /home/ubuntu/loadbalancer/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg
+        network_mode: host
+
