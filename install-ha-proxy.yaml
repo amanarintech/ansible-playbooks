@@ -1,3 +1,4 @@
+---
 - name: Install and Configure HA Proxy
   hosts: all
   become: yes

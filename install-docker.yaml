@@ -125,4 +125,3 @@
         volumes:
           - /home/ubuntu/loadbalancer/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg
         network_mode: host
-
